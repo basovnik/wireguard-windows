@@ -7,8 +7,12 @@ package main
 
 import (
 	"net"
+	"os"
+
+	"golang.org/x/sys/windows"
 
 	"C"
+
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/ipc"
@@ -27,9 +31,29 @@ func init() {
 	tunnelHandles = make(map[int32]TunnelHandle)
 }
 
+//export wgTurnOnEmpty
+func wgTurnOnEmpty() int32 {
+	return 1
+}
+
 //export wgTurnOn
-func wgTurnOn(interfaceName string, settings string) int32 {
+func wgTurnOn(interfaceNamePtr *uint16, settingsPtr *uint16) int32 {
+
 	log := device.NewLogger(device.LogLevelVerbose, "")
+
+	log.Verbosef("Starting %v %v", interfaceNamePtr, settingsPtr)
+
+	interfaceName := windows.UTF16PtrToString(interfaceNamePtr)
+	settings := windows.UTF16PtrToString(settingsPtr)
+
+	log.Verbosef("... %v", interfaceName)
+	log.Verbosef("... %v", settings)
+
+	path, err := os.Getwd()
+	if err != nil {
+		log.Verbosef("%v", err)
+	}
+	log.Verbosef(path) // for example /home/user
 
 	tun, err := tun.CreateTUN(interfaceName, 1420)
 	if err != nil {
@@ -37,6 +61,8 @@ func wgTurnOn(interfaceName string, settings string) int32 {
 		log.Errorf("CreateUnmonitoredTUNFromFD: %v", err)
 		return -1
 	}
+
+	log.Verbosef("... %v %v", tun, err)
 
 	log.Verbosef("Creating interface instance")
 	bind := conn.NewDefaultBind()
@@ -77,9 +103,10 @@ func wgTurnOn(interfaceName string, settings string) int32 {
 		}
 	}()
 
-	tunnelHandles[0] = TunnelHandle{device: dev, uapi: uapi}
+	idx := int32(0)
+	tunnelHandles[idx] = TunnelHandle{device: dev, uapi: uapi}
 
-	return 0
+	return idx
 }
 
 //export wgTurnOff
