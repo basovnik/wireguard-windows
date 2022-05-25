@@ -6,44 +6,93 @@
 package main
 
 import (
+	"net"
+
 	"C"
-
-	"golang.org/x/crypto/curve25519"
-	"golang.org/x/sys/windows"
-
+	"golang.zx2c4.com/wireguard/conn"
+	"golang.zx2c4.com/wireguard/device"
+	"golang.zx2c4.com/wireguard/ipc"
+	"golang.zx2c4.com/wireguard/tun"
 	"golang.zx2c4.com/wireguard/windows/conf"
-	"golang.zx2c4.com/wireguard/windows/tunnel"
-
-	"crypto/rand"
-	"log"
-	"path/filepath"
-	"unsafe"
 )
 
-//export WireGuardTunnelService
-func WireGuardTunnelService(confFile16 *uint16) bool {
-	confFile := windows.UTF16PtrToString(confFile16)
-	conf.PresetRootDirectory(filepath.Dir(confFile))
-	tunnel.UseFixedGUIDInsteadOfDeterministic = true
-	err := tunnel.Run(confFile)
-	if err != nil {
-		log.Printf("Service run error: %v", err)
-	}
-	return err == nil
+type TunnelHandle struct {
+	device *device.Device
+	uapi   net.Listener
 }
 
-//export WireGuardGenerateKeypair
-func WireGuardGenerateKeypair(publicKey *byte, privateKey *byte) {
-	publicKeyArray := (*[32]byte)(unsafe.Pointer(publicKey))
-	privateKeyArray := (*[32]byte)(unsafe.Pointer(privateKey))
-	n, err := rand.Read(privateKeyArray[:])
-	if err != nil || n != len(privateKeyArray) {
-		panic("Unable to generate random bytes")
-	}
-	privateKeyArray[0] &= 248
-	privateKeyArray[31] = (privateKeyArray[31] & 127) | 64
+var tunnelHandles map[int32]TunnelHandle
 
-	curve25519.ScalarBaseMult(publicKeyArray, privateKeyArray)
+func init() {
+	tunnelHandles = make(map[int32]TunnelHandle)
+}
+
+//export wgTurnOn
+func wgTurnOn(interfaceName string, settings string) int32 {
+	log := device.NewLogger(device.LogLevelVerbose, "")
+
+	tun, err := tun.CreateTUN(interfaceName, 1420)
+	if err != nil {
+		// unix.Close(int(tunFd))
+		log.Errorf("CreateUnmonitoredTUNFromFD: %v", err)
+		return -1
+	}
+
+	log.Verbosef("Creating interface instance")
+	bind := conn.NewDefaultBind()
+	dev := device.NewDevice(tun, bind, log)
+
+	log.Verbosef("Setting interface configuration")
+	config, err := conf.FromWgQuick(settings, interfaceName)
+	if err != nil {
+		log.Errorf("FromWgQuick: %v", err)
+		return -1
+	}
+	uapi, err := ipc.UAPIListen(interfaceName)
+	if err != nil {
+		log.Errorf("FromWgQuick: %v", err)
+		return -1
+	}
+	err = dev.IpcSet(config.ToUAPI())
+	if err != nil {
+		log.Errorf("FromWgQuick: %v", err)
+		return -1
+	}
+
+	log.Verbosef("Bringing peers up")
+	dev.Up()
+
+	// var clamper mtuClamper
+	// clamper = nativeTun
+	// watcher.Configure(bind.(conn.BindSocketToInterface), clamper, nil, config, luid)
+
+	log.Verbosef("Listening for UAPI requests")
+	go func() {
+		for {
+			conn, err := uapi.Accept()
+			if err != nil {
+				continue
+			}
+			go dev.IpcHandle(conn)
+		}
+	}()
+
+	tunnelHandles[0] = TunnelHandle{device: dev, uapi: uapi}
+
+	return 0
+}
+
+//export wgTurnOff
+func wgTurnOff(tunnelHandle int32) {
+	handle, ok := tunnelHandles[tunnelHandle]
+	if !ok {
+		return
+	}
+	delete(tunnelHandles, tunnelHandle)
+	if handle.uapi != nil {
+		handle.uapi.Close()
+	}
+	handle.device.Close()
 }
 
 func main() {}
