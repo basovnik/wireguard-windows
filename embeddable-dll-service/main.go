@@ -7,7 +7,6 @@ package main
 
 import (
 	"net"
-	"os"
 
 	"golang.org/x/sys/windows"
 
@@ -46,27 +45,24 @@ func wgTurnOn(interfaceNamePtr *uint16, settingsPtr *uint16) int32 {
 	interfaceName := windows.UTF16PtrToString(interfaceNamePtr)
 	settings := windows.UTF16PtrToString(settingsPtr)
 
-	log.Verbosef("... %v", interfaceName)
-	log.Verbosef("... %v", settings)
-
-	path, err := os.Getwd()
-	if err != nil {
-		log.Verbosef("%v", err)
-	}
-	log.Verbosef(path) // for example /home/user
-
 	tun, err := tun.CreateTUN(interfaceName, 1420)
 	if err != nil {
 		// unix.Close(int(tunFd))
 		log.Errorf("CreateUnmonitoredTUNFromFD: %v", err)
 		return -1
+	} else {
+		realInterfaceName, err2 := tun.Name()
+		if err2 == nil {
+			interfaceName = realInterfaceName
+		}
 	}
-
-	log.Verbosef("... %v %v", tun, err)
 
 	log.Verbosef("Creating interface instance")
 	bind := conn.NewDefaultBind()
 	dev := device.NewDevice(tun, bind, log)
+
+	log.Verbosef("Bringing peers up")
+	dev.Up()
 
 	log.Verbosef("Setting interface configuration")
 	config, err := conf.FromWgQuick(settings, interfaceName)
@@ -84,9 +80,6 @@ func wgTurnOn(interfaceNamePtr *uint16, settingsPtr *uint16) int32 {
 		log.Errorf("FromWgQuick: %v", err)
 		return -1
 	}
-
-	log.Verbosef("Bringing peers up")
-	dev.Up()
 
 	// var clamper mtuClamper
 	// clamper = nativeTun
