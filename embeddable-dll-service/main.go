@@ -12,7 +12,7 @@ import (
 
 	"C"
 
-	"golang.zx2c4.com/wireguard/conn"
+	wgconn "golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/ipc"
 	"golang.zx2c4.com/wireguard/tun"
@@ -24,10 +24,13 @@ type TunnelHandle struct {
 	uapi   net.Listener
 }
 
-var tunnelHandles map[int32]TunnelHandle
+var (
+	tunnelHandle TunnelHandle
+	log          *device.Logger
+)
 
 func init() {
-	tunnelHandles = make(map[int32]TunnelHandle)
+	log = device.NewLogger(device.LogLevelVerbose, "")
 }
 
 //export wgTurnOnEmpty
@@ -37,32 +40,32 @@ func wgTurnOnEmpty() int32 {
 
 //export wgTurnOn
 func wgTurnOn(interfaceNamePtr *uint16, settingsPtr *uint16) int32 {
-
-	log := device.NewLogger(device.LogLevelVerbose, "")
-
 	log.Verbosef("Starting %v %v", interfaceNamePtr, settingsPtr)
 
 	interfaceName := windows.UTF16PtrToString(interfaceNamePtr)
 	settings := windows.UTF16PtrToString(settingsPtr)
 
-	tun, err := tun.CreateTUN(interfaceName, 1420)
+	tunDevice, err := tun.CreateTUN(interfaceName, 1420)
 	if err != nil {
-		// unix.Close(int(tunFd))
-		log.Errorf("CreateUnmonitoredTUNFromFD: %v", err)
+		log.Errorf("CreateTUN: %v", err)
 		return -1
 	} else {
-		realInterfaceName, err2 := tun.Name()
+		realInterfaceName, err2 := tunDevice.Name()
 		if err2 == nil {
 			interfaceName = realInterfaceName
 		}
 	}
 
 	log.Verbosef("Creating interface instance")
-	bind := conn.NewDefaultBind()
-	dev := device.NewDevice(tun, bind, log)
+	bind := wgconn.NewDefaultBind()
+	dev := device.NewDevice(tunDevice, bind, log)
 
 	log.Verbosef("Bringing peers up")
-	dev.Up()
+	err = dev.Up()
+	if err != nil {
+		log.Errorf("Up: %v", err)
+		return -1
+	}
 
 	log.Verbosef("Setting interface configuration")
 	config, err := conf.FromWgQuick(settings, interfaceName)
@@ -72,47 +75,43 @@ func wgTurnOn(interfaceNamePtr *uint16, settingsPtr *uint16) int32 {
 	}
 	uapi, err := ipc.UAPIListen(interfaceName)
 	if err != nil {
-		log.Errorf("FromWgQuick: %v", err)
+		log.Errorf("UAPIListen: %v", err)
 		return -1
 	}
 	err = dev.IpcSet(config.ToUAPI())
 	if err != nil {
-		log.Errorf("FromWgQuick: %v", err)
+		log.Errorf("IpcSet: %v", err)
 		return -1
 	}
-
-	// var clamper mtuClamper
-	// clamper = nativeTun
-	// watcher.Configure(bind.(conn.BindSocketToInterface), clamper, nil, config, luid)
 
 	log.Verbosef("Listening for UAPI requests")
 	go func() {
 		for {
 			conn, err := uapi.Accept()
 			if err != nil {
+				log.Verbosef("Accept: %v", err)
 				continue
 			}
 			go dev.IpcHandle(conn)
 		}
 	}()
 
-	idx := int32(0)
-	tunnelHandles[idx] = TunnelHandle{device: dev, uapi: uapi}
+	tunnelHandle = TunnelHandle{device: dev, uapi: uapi}
 
-	return idx
+	return 0
 }
 
 //export wgTurnOff
-func wgTurnOff(tunnelHandle int32) {
-	handle, ok := tunnelHandles[tunnelHandle]
-	if !ok {
-		return
+func wgTurnOff() {
+	if tunnelHandle.uapi != nil {
+		err := tunnelHandle.uapi.Close()
+		if err != nil {
+			log.Errorf("UAPI Close: %v", err)
+		}
 	}
-	delete(tunnelHandles, tunnelHandle)
-	if handle.uapi != nil {
-		handle.uapi.Close()
+	if tunnelHandle.device != nil {
+		tunnelHandle.device.Close()
 	}
-	handle.device.Close()
 }
 
 func main() {}
