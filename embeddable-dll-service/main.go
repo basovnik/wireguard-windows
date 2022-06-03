@@ -7,6 +7,7 @@ package main
 
 import (
 	"net"
+	"os"
 
 	"golang.org/x/sys/windows"
 
@@ -26,10 +27,19 @@ type TunnelHandle struct {
 
 var (
 	tunnelHandle TunnelHandle
+	logFile      *os.File
 	log          *device.Logger
 )
 
 func init() {
+	var err error
+	logFile, err = os.OpenFile("C:\\ProgramData\\JamfTrust\\logs\\wireguard-go.log", os.O_RDWR|os.O_APPEND|os.O_CREATE, 0666)
+	if err != nil {
+		panic(err)
+	}
+	os.Stdout = logFile
+	os.Stderr = logFile
+
 	log = device.NewLogger(device.LogLevelVerbose, "")
 }
 
@@ -40,6 +50,12 @@ func wgTurnOnEmpty() int32 {
 
 //export wgTurnOn
 func wgTurnOn(interfaceNamePtr *uint16, settingsPtr *uint16) int32 {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Errorf("Recovered from panic: ", r)
+		}
+	}()
+
 	log.Verbosef("Starting %v %v", interfaceNamePtr, settingsPtr)
 
 	interfaceName := windows.UTF16PtrToString(interfaceNamePtr)
@@ -48,6 +64,7 @@ func wgTurnOn(interfaceNamePtr *uint16, settingsPtr *uint16) int32 {
 	tunDevice, err := tun.CreateTUN(interfaceName, 1420)
 	if err != nil {
 		log.Errorf("CreateTUN: %v", err)
+		logFile.Close()
 		return -1
 	} else {
 		realInterfaceName, err2 := tunDevice.Name()
@@ -64,6 +81,7 @@ func wgTurnOn(interfaceNamePtr *uint16, settingsPtr *uint16) int32 {
 	err = dev.Up()
 	if err != nil {
 		log.Errorf("Up: %v", err)
+		logFile.Close()
 		return -1
 	}
 
@@ -71,16 +89,19 @@ func wgTurnOn(interfaceNamePtr *uint16, settingsPtr *uint16) int32 {
 	config, err := conf.FromWgQuick(settings, interfaceName)
 	if err != nil {
 		log.Errorf("FromWgQuick: %v", err)
+		logFile.Close()
 		return -1
 	}
 	uapi, err := ipc.UAPIListen(interfaceName)
 	if err != nil {
 		log.Errorf("UAPIListen: %v", err)
+		logFile.Close()
 		return -1
 	}
 	err = dev.IpcSet(config.ToUAPI())
 	if err != nil {
 		log.Errorf("IpcSet: %v", err)
+		logFile.Close()
 		return -1
 	}
 
@@ -111,6 +132,10 @@ func wgTurnOff() {
 	}
 	if tunnelHandle.device != nil {
 		tunnelHandle.device.Close()
+	}
+
+	if logFile != nil {
+		logFile.Close()
 	}
 }
 
