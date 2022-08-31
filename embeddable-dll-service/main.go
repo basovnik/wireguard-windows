@@ -6,6 +6,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -14,10 +15,10 @@ import (
 
 	"C"
 
-	wgconn "golang.zx2c4.com/wireguard/conn"
-	"golang.zx2c4.com/wireguard/device"
-	"golang.zx2c4.com/wireguard/ipc"
-	"golang.zx2c4.com/wireguard/tun"
+	wgconn "github.com/wandera/wireguard-go/conn"
+	"github.com/wandera/wireguard-go/device"
+	"github.com/wandera/wireguard-go/ipc"
+	"github.com/wandera/wireguard-go/tun"
 	"golang.zx2c4.com/wireguard/windows/conf"
 )
 
@@ -53,6 +54,8 @@ func wgTurnOnEmpty() int32 {
 
 //export wgTurnOn
 func wgTurnOn(interfaceNamePtr *uint16, settingsPtr *uint16) int32 {
+	fmt.Println("inside wgTurnOn()")
+
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Errorf("Recovered from panic: ", r)
@@ -64,7 +67,9 @@ func wgTurnOn(interfaceNamePtr *uint16, settingsPtr *uint16) int32 {
 	interfaceName := windows.UTF16PtrToString(interfaceNamePtr)
 	settings := windows.UTF16PtrToString(settingsPtr)
 
+	logger.Verbosef("before creating TUN...")
 	tunDevice, err := tun.CreateTUN(interfaceName, 1420)
+	logger.Verbosef("after creating TUN...")
 	if err != nil {
 		logger.Errorf("CreateTUN: %v", err)
 		logFile.Close()
@@ -127,6 +132,8 @@ func wgTurnOn(interfaceNamePtr *uint16, settingsPtr *uint16) int32 {
 
 //export wgTurnOff
 func wgTurnOff() {
+	fmt.Println("inside wgTurnOff()")
+
 	if tunnelHandle.uapi != nil {
 		err := tunnelHandle.uapi.Close()
 		if err != nil {
@@ -138,7 +145,10 @@ func wgTurnOff() {
 	}
 
 	if logFile != nil {
-		logFile.Close()
+		err := logFile.Close()
+		if err != nil {
+			fmt.Println(err)
+		}
 	}
 }
 

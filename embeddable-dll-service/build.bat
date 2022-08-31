@@ -4,7 +4,8 @@ rem Copyright (C) 2019-2021 WireGuard LLC. All Rights Reserved.
 
 setlocal
 set BUILDDIR=%~dp0
-set PATH=%BUILDDIR%..\.deps\llvm-mingw\bin;%BUILDDIR%..\.deps\go\bin;%PATH%
+rem set PATH=%BUILDDIR%..\.deps\llvm-mingw\bin;%BUILDDIR%..\.deps\go\bin;%PATH%
+set PATH=%BUILDDIR%..\.deps\llvm-mingw\bin;%PATH%
 set PATHEXT=.exe
 cd /d %BUILDDIR% || exit /b 1
 
@@ -15,8 +16,8 @@ if exist ..\.deps\prepared goto :build
 :build
 	set GOOS=windows
 	set GOARM=7
-	set GOPATH=%BUILDDIR%..\.deps\gopath
-	set GOROOT=%BUILDDIR%..\.deps\go
+	rem set GOPATH=%BUILDDIR%..\.deps\gopath
+	rem set GOROOT=%BUILDDIR%..\.deps\go
 	set CGO_ENABLED=1
 	set CGO_CFLAGS=-O3 -Wall -Wno-unused-function -Wno-switch -std=gnu11 -DWINVER=0x0601
 	call :build_plat x86 i686 386 || goto :error
