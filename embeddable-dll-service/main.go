@@ -35,7 +35,15 @@ var (
 	logger       *device.Logger
 )
 
-func init() {
+//export wgTurnOnEmpty
+func wgTurnOnEmpty() int32 {
+	return 1
+}
+
+//export wgTurnOn
+func wgTurnOn(interfaceNamePtr *uint16, settingsPtr *uint16) int32 {
+	fmt.Println("inside wgTurnOn()")
+
 	var err error
 	logFile, err = os.OpenFile(logFilePath, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0666)
 	if err != nil {
@@ -45,16 +53,6 @@ func init() {
 		Verbosef: log.New(logFile, "DEBUG:", log.Ldate|log.Ltime).Printf,
 		Errorf:   log.New(logFile, "ERROR:", log.Ldate|log.Ltime).Printf,
 	}
-}
-
-//export wgTurnOnEmpty
-func wgTurnOnEmpty() int32 {
-	return 1
-}
-
-//export wgTurnOn
-func wgTurnOn(interfaceNamePtr *uint16, settingsPtr *uint16) int32 {
-	fmt.Println("inside wgTurnOn()")
 
 	defer func() {
 		if r := recover(); r != nil {
